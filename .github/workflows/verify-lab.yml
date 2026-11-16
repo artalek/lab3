@@ -1,0 +1,46 @@
+name: Verify lab experiments
+on: push
+permissions:
+  contents: read
+jobs:
+  experiments:
+    runs-on: ubuntu-latest
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy==2.3.5 pandas==3.0.1 scikit-learn==1.7.2
+      - run: python run_experiments.py
+      - name: Check model contracts and summarize datasets
+        run: |
+          python - <<'PY'
+          import numpy as np
+          import pandas as pd
+          from sklearn.model_selection import train_test_split
+          from grader_contracts.linear_models import RegressionInput, ClassificationInput
+          from linear_models import train_linear_regression, train_logistic_classifier
+
+          x = np.array([[1., 2.], [1., 4.], [1., 6.], [1., 8.]])
+          y = 4. * x[:, 1] + 2.
+          model = train_linear_regression(RegressionInput(x, y[:, None], x, y))
+          np.testing.assert_allclose(model.predictions, y, atol=1e-9)
+          np.testing.assert_allclose(x @ model.weights + model.bias, model.predictions)
+          assert len(model.loss_history) == 800 and model.loss_history[-1] < model.loss_history[0]
+          labels = np.array([0, 0, 1, 1])
+          model = train_logistic_classifier(ClassificationInput(x, labels[:, None], x, labels))
+          np.testing.assert_array_equal(model.predictions, labels)
+          np.testing.assert_allclose(1. / (1. + np.exp(-(x @ model.weights + model.bias))), model.probabilities)
+          assert len(model.loss_history) == 1000 and model.loss_history[-1] < model.loss_history[0]
+
+          students = pd.read_csv('Student_Performance.csv')
+          credit = pd.read_csv('german.csv', sep=';')
+          print('Datasets:', students.shape, credit.shape)
+          print('Nulls:', students.isna().sum().sum(), credit.isna().sum().sum())
+          print('Class counts:', credit.Creditability.value_counts().to_dict())
+          train, test = train_test_split(students['Performance Index'], test_size=.2, random_state=42)
+          print('Mean-only test MSE:', ((train.mean() - test) ** 2).mean())
+          PY
